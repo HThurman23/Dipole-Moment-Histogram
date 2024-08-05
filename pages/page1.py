@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from scipy.integrate import simps
+#from scipy.integrate import simps
 import tempfile
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
+from numpy import trapz
 
 # Constants
 FAIMS_ELECTRODE_GAP = 0.188  # cm
@@ -164,7 +165,7 @@ def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
         normalized_intensity = normalized_intensity[valid_indices]
 
         if len(ec_values) > 1:  # Ensure there's enough data to integrate
-            area = simps(normalized_intensity, ec_values)
+            area = trapz(normalized_intensity, ec_values)
         else:
             area = 0
 
