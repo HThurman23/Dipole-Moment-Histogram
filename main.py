@@ -1,18 +1,22 @@
 import streamlit as st
-import pages.page1 as page1
-import pages.page2 as page2
-import pages.page3 as page3
+import dipole_moment_calculator  # Adjust to your actual file names
+import data_analysis
+import settings
 
 st.set_page_config(page_title="Modular Dashboard", layout="wide")
 
 # Sidebar navigation
 st.sidebar.title("Navigation")
-page = st.sidebar.selectbox("Go to", ["LODIMS Dipole Moment Calculator", "Page 2", "Page 3"])
+page = st.sidebar.selectbox("Go to", [
+    "Dipole Moment Calculator",
+    "Data Analysis",
+    "Settings"
+])
 
 # Load the selected page
-if page == "LODIMS Dipole Moment Calculator":
-    page1.app()
-elif page == "Page 2":
-    page2.app()
-elif page == "Page 3":
-    page3.app()
+if page == "Dipole Moment Calculator":
+    dipole_moment_calculator.app()
+elif page == "Data Analysis":
+    data_analysis.app()
+elif page == "Settings":
+    settings.app()
