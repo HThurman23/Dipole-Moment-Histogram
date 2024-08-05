@@ -368,7 +368,7 @@ def app():
     num_sets = st.text_input("Number of Sets (comma separated)", "1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1")
     num_sets = [float(n) for n in num_sets.split(",")]
     threshold = st.number_input("Threshold for Alignment (0 to 1)", value=0.05, min_value=0.0, max_value=1.0)
-    start_ED = st.number_input("Start Alignment Point (ED)", value=1.00)
+    start_ED = st.number_input("Start Alignment Point (ED)", value=1.00, step=0.01)
     last_spectrum_voltage = st.number_input("Last Spectrum Voltage (ED)", value=0.1)
     exclude_negative_density = st.checkbox("Exclude Negative Density", value=False)
 
