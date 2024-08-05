@@ -1,7 +1,7 @@
-streamlit
-pandas
-numpy
-statsmodels
-scipy
-plotly
-openpyxl
+streamlit==1.15.0
+pandas==1.4.2
+numpy==1.22.3
+statsmodels==0.13.2
+scipy==1.8.0
+plotly==5.7.0
+openpyxl==3.0.9
