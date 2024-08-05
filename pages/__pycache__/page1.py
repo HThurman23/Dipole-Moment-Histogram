@@ -17,6 +17,31 @@ DEBYE_CONVERSION = 3.33564e-30  # C·m in one Debye
 # Set Plotly theme
 plotly_template = "plotly_dark"
 
+# Information about calculations
+def show_calculation_info():
+    with st.expander("Click here to learn how each calculation is made"):
+        st.markdown("""
+        **1. Electric Field Compensation (Ec):**
+        - Calculation: `Ec = (bias - (cv_start - (time * scan_rate))) / FAIMS_ELECTRODE_GAP`
+        - Explanation: This calculates the electric field compensation required based on input parameters.
+
+        **2. Normalize Intensity:**
+        - Calculation: `intensity / max(intensity)`
+        - Explanation: This normalizes the intensity data to a scale from 0 to 1.
+
+        **3. Smooth Data:**
+        - Calculation: LOWESS smoothing using `statsmodels`
+        - Explanation: Applies local regression smoothing to the intensity data.
+
+        **4. Linear Regression:**
+        - Calculation: `LinearRegression().fit(X, y)`
+        - Explanation: Fits a linear model to the data points to understand the relationship between Ed and threshold Ec.
+
+        **5. Dipole Moment Calculation:**
+        - Calculation: `D_moment = (K_B * T_ION) / (2 * Ed * 1e8) / DEBYE_CONVERSION`
+        - Explanation: Calculates the dipole moment based on temperature, Boltzmann constant, and Ed.
+        """)
+
 # Function to calculate electric field compensation (Ec)
 def calculate_ec(time, bias, cv_start, scan_rate):
     return (bias - (cv_start - (time * scan_rate))) / FAIMS_ELECTRODE_GAP
@@ -334,6 +359,9 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
 # Main function to run the Streamlit app
 def app():
     st.title("Data Processing and Plotting")
+    
+    # Display the information button
+    show_calculation_info()
     
     uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx")
     manual_shift = st.number_input("Manual Shift", value=2.2)
