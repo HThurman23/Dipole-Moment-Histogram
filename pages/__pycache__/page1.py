@@ -418,27 +418,6 @@ def app():
                 
                 fig4 = calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density)
                 
-                # Add download buttons for each plot
-                st.download_button(
-                    label="Download Aligned Peak Data Plot",
-                    data=fig1.to_image(format="png"),
-                    file_name="aligned_peak_data_plot.png",
-                    mime="image/png"
-                )
-                st.download_button(
-                    label="Download Threshold Intersections Plot",
-                    data=fig2.to_image(format="png"),
-                    file_name="threshold_intersections_plot.png",
-                    mime="image/png"
-                )
-                st.download_button(
-                    label="Download Fraction Aligned Plot",
-                    data=fig3.to_image(format="png"),
-                    file_name="fraction_aligned_plot.png",
-                    mime="image/png"
-                )
-
-
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
