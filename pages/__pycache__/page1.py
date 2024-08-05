@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-#from scipy.integrate import simps
 import tempfile
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
@@ -18,15 +17,19 @@ DEBYE_CONVERSION = 3.33564e-30  # C·m in one Debye
 # Set Plotly theme
 plotly_template = "plotly_dark"
 
+# Function to calculate electric field compensation (Ec)
 def calculate_ec(time, bias, cv_start, scan_rate):
     return (bias - (cv_start - (time * scan_rate))) / FAIMS_ELECTRODE_GAP
 
+# Function to normalize intensity values
 def normalize_intensity(intensity):
     return intensity / max(intensity)
 
+# Function to smooth intensity data using LOWESS
 def smooth_data(intensity, frac=0.03):
     return sm.nonparametric.lowess(intensity, np.arange(len(intensity)), frac=frac, it=0, return_sorted=False)
 
+# Function to find the rightmost index where intensity is at least half of the maximum
 def find_rightmost_index(ec_values, intensity):
     half_max = max(intensity) / 2
     indices_above_half = np.where(intensity >= half_max)[0]
@@ -34,12 +37,14 @@ def find_rightmost_index(ec_values, intensity):
         return ec_values[indices_above_half[-1]]
     return None
 
+# Function to adjust Ec values to align peaks
 def adjust_ec_values(ec_values, current_index, target_index, manual_shift):
     if current_index is not None:
         shift_value = target_index - current_index
         return ec_values + shift_value - manual_shift
     return ec_values
 
+# Function to process data from the provided Excel file
 def process_data(file_path, num_sets, manual_shift):
     max_right_index = -np.inf
     processed_data = []
@@ -59,13 +64,14 @@ def process_data(file_path, num_sets, manual_shift):
 
         processed_data.append((kv, ec_values, normalized_intensity, current_right_index))
 
-    # Adjust Ec values to align to the maximum rightmost index
+    # Align Ec values to the maximum rightmost index
     for i, (kv, ec_values, normalized_intensity, current_right_index) in enumerate(processed_data):
         adjusted_ec_values = adjust_ec_values(ec_values, current_right_index, max_right_index, manual_shift)
         processed_data[i] = (kv, adjusted_ec_values, normalized_intensity)
 
     return processed_data
 
+# Function to plot processed data
 def plot_data(processed_data):
     fig = go.Figure()
 
@@ -86,6 +92,7 @@ def plot_data(processed_data):
     st.plotly_chart(fig)
     return fig
 
+# Function to save processed data to an Excel file
 def save_processed_data_to_excel(processed_data, filename):
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         for kv, ec_values, normalized_intensity in processed_data:
@@ -95,6 +102,7 @@ def save_processed_data_to_excel(processed_data, filename):
             })
             df.to_excel(writer, sheet_name=f'{kv} kV', index=False)
 
+# Function to find intersections at a specified threshold
 def find_intersections(processed_data, threshold):
     intersections = []
     for kv, ec_values, normalized_intensity in processed_data:
@@ -107,21 +115,26 @@ def find_intersections(processed_data, threshold):
                 break
     return intersections
 
+# Function to store intersections data in a DataFrame
 def store_intersections_in_dataframe(intersections):
     df = pd.DataFrame(intersections, columns=["num_set", "threshold_Ec"])
     return df
 
+# Function to calculate Ed values
 def calculate_ED_values(df):
     df["E_D"] = df["num_set"] / FAIMS_ELECTRODE_GAP
     return df
 
+# Function to calculate dipole moment values
 def calculate_dipole_values(df):
     df["D_moment"] = (K_B * T_ION) / (2 * df["E_D"] * 1e8) / DEBYE_CONVERSION
     return df 
 
+# Function to filter data by Ed values
 def filter_by_ED(df, start_ED):
     return df[df["E_D"] >= start_ED]
 
+# Function to plot threshold intersections
 def plot_intersections(df):
     fig = go.Figure()
 
@@ -145,6 +158,7 @@ def plot_intersections(df):
     st.plotly_chart(fig)
     return fig
 
+# Function to perform linear regression on the data
 def perform_linear_regression(df):
     X = df["E_D"].values.reshape(-1, 1)
     y = df["threshold_Ec"].values
@@ -156,22 +170,21 @@ def perform_linear_regression(df):
 
     return slope, intercept, r2
 
+# Function to calculate the fraction of aligned data
 def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
     areas = []
     for kv, ec_values, normalized_intensity in processed_data:
-        # Remove NaN values from intensity and corresponding ec_values
         valid_indices = ~np.isnan(normalized_intensity)
         ec_values = ec_values[valid_indices]
         normalized_intensity = normalized_intensity[valid_indices]
 
-        if len(ec_values) > 1:  # Ensure there's enough data to integrate
+        if len(ec_values) > 1:
             area = trapz(normalized_intensity, ec_values)
         else:
             area = 0
 
         areas.append((kv, area))
 
-    # Find the area under the last spectrum
     last_spectrum_area = next((area for kv, area in areas if kv == last_spectrum_voltage), None)
     
     if last_spectrum_area is None or last_spectrum_area == 0:
@@ -182,6 +195,7 @@ def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
 
     return pd.DataFrame(fractions, columns=["num_set", "fraction_aligned"])
 
+# Function to plot fraction of aligned data
 def plot_fraction_aligned(df):
     fig = go.Figure()
 
@@ -205,21 +219,18 @@ def plot_fraction_aligned(df):
     st.plotly_chart(fig)
     return fig
 
+# Function to calculate and plot histogram of dipole moments
 def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
-    # Initialize lists to store bin edges and heights
     bin_edges = []
     bin_heights = []
 
-    # Calculate the first bin for the unaligned fraction
     unaligned_fraction = 1 - df_fraction_aligned['fraction_aligned'].iloc[0]
     first_bin_width = df_fraction_aligned['D_moment'].iloc[0]
     first_bin_height = unaligned_fraction / first_bin_width
 
-    # Add the first bin
     bin_edges.append((0, df_fraction_aligned['D_moment'].iloc[0]))
     bin_heights.append(first_bin_height)
 
-    # Loop through the rest of the DataFrame to calculate increments and bin heights
     for i in range(1, len(df_fraction_aligned)):
         increment_FA = df_fraction_aligned['fraction_aligned'].iloc[i-1] - df_fraction_aligned['fraction_aligned'].iloc[i]
         bin_width = df_fraction_aligned['D_moment'].iloc[i] - df_fraction_aligned['D_moment'].iloc[i-1]
@@ -229,33 +240,24 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
             bin_edges.append((df_fraction_aligned['D_moment'].iloc[i-1], df_fraction_aligned['D_moment'].iloc[i]))
             bin_heights.append(bin_height)
 
-    # Normalize the bin heights so that their total area sums to 1
     total_area = sum(bin_heights[i] * (bin_edges[i][1] - bin_edges[i][0]) for i in range(len(bin_heights)))
     bin_heights = [height / total_area for height in bin_heights]
 
-    normalized_total_area = sum(bin_heights[i] * (bin_edges[i][1] - bin_edges[i][0]) for i in range(len(bin_heights)))
-    st.write(f"Normalized Total Area: {normalized_total_area}")
-
-    # Exclude negative density if the checkbox is checked
     if exclude_negative_density:
         bin_heights = [max(0, height) for height in bin_heights]
 
-    # Prepare data for plotting
     bin_centers = [(edge[0] + edge[1]) / 2 for edge in bin_edges]
     bin_widths = [edge[1] - edge[0] for edge in bin_edges]
 
-    # Create a DataFrame for the histogram raw data
     df_histogram = pd.DataFrame({
         'Bin Center': bin_centers,
         'Bin Width': bin_widths,
         'Bin Height': bin_heights
     })
 
-    # Display the histogram raw data
     st.write("Histogram Raw Data:")
     st.write(df_histogram)
 
-    # Generate x/y data for the horizontal line plot
     x_data = []
     y_data = []
 
@@ -267,15 +269,13 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
         x_data.extend([center - width/2, center + width/2])
         y_data.extend([height, height])
 
-    # Create the horizontal line plot
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
         x=x_data,
         y=y_data,
         mode='lines',
-        name='Dipole Moment Histogram',
-        #line=dict(color='blue')
+        name='Dipole Moment Histogram'
     ))
 
     fig.update_layout(
@@ -283,8 +283,7 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
             text='Dipole Moment Histogram (Horizontal Line Plot)',
             font=dict(
                 family="Times New Roman",
-                size=16,
-                #color='black'
+                size=16
             ),
             x=0.5,
             xanchor='center'
@@ -294,57 +293,45 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
                 text='Dipole Moment (kD)',
                 font=dict(
                     family="Times New Roman",
-                    size=14,
-                    #color='black'
+                    size=14
                 )
             ),
             showgrid=False,
-            #linecolor='black',  # Bolden axis lines
             linewidth=2,
             ticks='outside',
             tickwidth=2,
-            tickfont=dict(family='Times New Roman', 
-                          #color='black', 
-                          size=14)
+            tickfont=dict(family='Times New Roman', size=14)
         ),
         yaxis=dict(
             title=dict(
                 text='Density of Species',
                 font=dict(
                     family="Times New Roman",
-                    size=14,
-                    #color='White'
+                    size=14
                 )
             ),
             showgrid=False,
-            #linecolor='black',  # Bolden axis lines
             linewidth=2,
             ticks='outside',
             tickwidth=2,
-            tickfont=dict(family='Times New Roman', 
-                          #color='black', 
-                          size=14)
+            tickfont=dict(family='Times New Roman', size=14)
         ),
-        # plot_bgcolor='white',
-        # paper_bgcolor='white',
-        margin=dict(t=50, b=40, l=50, r=50)  # Adjust margins to reduce white space
+        margin=dict(t=50, b=40, l=50, r=50)
     )
 
-    # Display the plot using Streamlit
     st.plotly_chart(fig)
 
-    # Create DataFrame for x/y data
     df_xy = pd.DataFrame({
         'x': x_data,
         'y': y_data
     })
 
-    # Display x/y data
     st.write("X/Y Data for Horizontal Line Plot:")
     st.write(df_xy)
 
     return fig
 
+# Main function to run the Streamlit app
 def app():
     st.title("Data Processing and Plotting")
     
