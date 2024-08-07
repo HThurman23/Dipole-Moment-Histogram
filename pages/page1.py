@@ -14,10 +14,10 @@ K_B = 1.380649e-23  # Boltzmann constant in J/K
 T_ION = 298.5  # Ion temperature in Kelvin
 DEBYE_CONVERSION = 3.33564e-30  # C·m in one Debye
 
-# Set Plotly theme
+# Theme
 plotly_template = "plotly_dark"
 
-# Information about calculations
+# Information
 def show_calculation_info():
     with st.expander("Click here to learn how each calculation is made"):
         st.markdown("""
@@ -42,19 +42,19 @@ def show_calculation_info():
         - Explanation: Calculates the dipole moment based on temperature, Boltzmann constant, and Ed.
         """)
 
-# Function to calculate electric field compensation (Ec)
+# Conversion from retention time (min) to compensation field (V/cm)
 def calculate_ec(time, bias, cv_start, scan_rate):
     return (bias - (cv_start - (time * scan_rate))) / FAIMS_ELECTRODE_GAP
 
-# Function to normalize intensity values
+# Normalization
 def normalize_intensity(intensity):
     return intensity / max(intensity)
 
-# Function to smooth intensity data using LOWESS
+# Smooth intensity by LOWESS
 def smooth_data(intensity, frac=0.03):
     return sm.nonparametric.lowess(intensity, np.arange(len(intensity)), frac=frac, it=0, return_sorted=False)
 
-# Function to find the rightmost index where intensity is at least half of the maximum
+# Find rightmost index where intensity is at least half of the maximum
 def find_rightmost_index(ec_values, intensity):
     half_max = max(intensity) / 2
     indices_above_half = np.where(intensity >= half_max)[0]
@@ -62,14 +62,14 @@ def find_rightmost_index(ec_values, intensity):
         return ec_values[indices_above_half[-1]]
     return None
 
-# Function to adjust Ec values to align peaks
+# Adjust Ec values to align peaks
 def adjust_ec_values(ec_values, current_index, target_index, manual_shift):
     if current_index is not None:
         shift_value = target_index - current_index
         return ec_values + shift_value - manual_shift
     return ec_values
 
-# Function to process data from the provided Excel file
+# Process data from the provided Excel file
 def process_data(file_path, num_sets, manual_shift):
     max_right_index = -np.inf
     processed_data = []
@@ -96,7 +96,7 @@ def process_data(file_path, num_sets, manual_shift):
 
     return processed_data
 
-# Function to plot processed data
+# Plot data using Plotly
 def plot_data(processed_data):
     fig = go.Figure()
 
@@ -117,7 +117,7 @@ def plot_data(processed_data):
     st.plotly_chart(fig)
     return fig
 
-# Function to save processed data to an Excel file
+# Data export to excel for chromatogram plot
 def save_processed_data_to_excel(processed_data, filename):
     with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         for kv, ec_values, normalized_intensity in processed_data:
@@ -127,7 +127,7 @@ def save_processed_data_to_excel(processed_data, filename):
             })
             df.to_excel(writer, sheet_name=f'{kv} kV', index=False)
 
-# Function to find intersections at a specified threshold
+# Find intersections at a specified threshold
 def find_intersections(processed_data, threshold):
     intersections = []
     for kv, ec_values, normalized_intensity in processed_data:
@@ -140,26 +140,26 @@ def find_intersections(processed_data, threshold):
                 break
     return intersections
 
-# Function to store intersections data in a DataFrame
+# Store intersections data in a DataFrame
 def store_intersections_in_dataframe(intersections):
     df = pd.DataFrame(intersections, columns=["num_set", "threshold_Ec"])
     return df
 
-# Function to calculate Ed values
+# Calculate Ed values
 def calculate_ED_values(df):
     df["E_D"] = df["num_set"] / FAIMS_ELECTRODE_GAP
     return df
 
-# Function to calculate dipole moment values
+# Calculate dipole moment values
 def calculate_dipole_values(df):
     df["D_moment"] = (K_B * T_ION) / (2 * df["E_D"] * 1e8) / DEBYE_CONVERSION
     return df 
 
-# Function to filter data by Ed values
+# Filter data by Ed values
 def filter_by_ED(df, start_ED):
     return df[df["E_D"] >= start_ED]
 
-# Function to plot threshold intersections
+# Plot threshold intersections
 def plot_intersections(df):
     fig = go.Figure()
 
@@ -183,7 +183,7 @@ def plot_intersections(df):
     st.plotly_chart(fig)
     return fig
 
-# Function to perform linear regression on the data
+# Linear regression on intersections
 def perform_linear_regression(df):
     X = df["E_D"].values.reshape(-1, 1)
     y = df["threshold_Ec"].values
@@ -195,7 +195,7 @@ def perform_linear_regression(df):
 
     return slope, intercept, r2
 
-# Function to calculate the fraction of aligned data
+# Calculate fraction of aligned data via integration
 def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
     areas = []
     for kv, ec_values, normalized_intensity in processed_data:
@@ -220,7 +220,7 @@ def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
 
     return pd.DataFrame(fractions, columns=["num_set", "fraction_aligned"])
 
-# Function to plot fraction of aligned data
+# Plot scatter plot of aligned fraction as function of ED
 def plot_fraction_aligned(df):
     fig = go.Figure()
 
@@ -244,7 +244,7 @@ def plot_fraction_aligned(df):
     st.plotly_chart(fig)
     return fig
 
-# Function to calculate and plot histogram of dipole moments
+# Calculate and plot dipole moment histograms
 def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
     bin_edges = []
     bin_heights = []
@@ -356,7 +356,7 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
 
     return fig
 
-# Main function to run the Streamlit app
+# Run streamlit app
 def app():
     st.title("Data Processing and Plotting")
     
@@ -421,6 +421,6 @@ def app():
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
-# Ensure this is run when the script is called
+# Initialize script when called
 if __name__ == "__main__":
     app()
