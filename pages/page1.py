@@ -9,7 +9,7 @@ from sklearn.metrics import r2_score
 from numpy import trapz
 
 # Constants
-FAIMS_ELECTRODE_GAP = 0.188  # cm
+FAIMS_ELECTRODE_GAP = 0.125  # cm
 K_B = 1.380649e-23  # Boltzmann constant in J/K
 T_ION = 298.5  # Ion temperature in Kelvin
 DEBYE_CONVERSION = 3.33564e-30  # C·m in one Debye
