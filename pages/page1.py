@@ -7,15 +7,16 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from numpy import trapz
+import io
 
 # Constants
-FAIMS_ELECTRODE_GAP = 0.125  # cm
-K_B = 1.380649e-23  # Boltzmann constant in J/K
-T_ION = 298.5  # Ion temperature in Kelvin
-DEBYE_CONVERSION = 3.33564e-30  # C·m in one Debye
+FAIMS_ELECTRODE_GAP = 0.188  
+K_B = 1.380649e-23  
+T_ION = 298.5 
+DEBYE_CONVERSION = 3.33564e-30  
 
 # Theme
-plotly_template = "plotly_dark"
+plotly_template = "ggplot2"
 
 # Information
 def show_calculation_info():
@@ -42,19 +43,19 @@ def show_calculation_info():
         - Explanation: Calculates the dipole moment based on temperature, Boltzmann constant, and Ed.
         """)
 
-# Conversion from retention time (min) to compensation field (V/cm)
+
 def calculate_ec(time, bias, cv_start, scan_rate):
     return (bias - (cv_start - (time * scan_rate))) / FAIMS_ELECTRODE_GAP
 
-# Normalization
+
 def normalize_intensity(intensity):
     return intensity / max(intensity)
 
-# Smooth intensity by LOWESS
+
 def smooth_data(intensity, frac=0.03):
     return sm.nonparametric.lowess(intensity, np.arange(len(intensity)), frac=frac, it=0, return_sorted=False)
 
-# Find rightmost index where intensity is at least half of the maximum
+
 def find_rightmost_index(ec_values, intensity):
     half_max = max(intensity) / 2
     indices_above_half = np.where(intensity >= half_max)[0]
@@ -62,15 +63,15 @@ def find_rightmost_index(ec_values, intensity):
         return ec_values[indices_above_half[-1]]
     return None
 
-# Adjust Ec values to align peaks
+
 def adjust_ec_values(ec_values, current_index, target_index, manual_shift):
     if current_index is not None:
         shift_value = target_index - current_index
         return ec_values + shift_value - manual_shift
     return ec_values
 
-# Process data from the provided Excel file
-def process_data(file_path, num_sets, manual_shift):
+
+def process_data(file_path, num_sets, manual_shift, background_data=None):
     max_right_index = -np.inf
     processed_data = []
 
@@ -80,7 +81,15 @@ def process_data(file_path, num_sets, manual_shift):
 
         data = pd.read_excel(file_path, skiprows=3, usecols=[i*2, i*2+1])
         ec_values = calculate_ec(data.iloc[:, 0], bias, cv_start, scan_rate)
-        smoothed_intensity = smooth_data(data.iloc[:, 1])
+        
+        intensity = data.iloc[:, 1]
+        
+        if background_data is not None:
+            background_intensity = background_data[i]
+            intensity -= background_intensity
+
+        smoothed_intensity = smooth_data(intensity)  
+
         normalized_intensity = normalize_intensity(smoothed_intensity)
 
         current_right_index = find_rightmost_index(ec_values, normalized_intensity)
@@ -89,14 +98,36 @@ def process_data(file_path, num_sets, manual_shift):
 
         processed_data.append((kv, ec_values, normalized_intensity, current_right_index))
 
-    # Align Ec values to the maximum rightmost index
     for i, (kv, ec_values, normalized_intensity, current_right_index) in enumerate(processed_data):
         adjusted_ec_values = adjust_ec_values(ec_values, current_right_index, max_right_index, manual_shift)
         processed_data[i] = (kv, adjusted_ec_values, normalized_intensity)
 
     return processed_data
 
-# Plot data using Plotly
+def load_background_data(background_files, num_sets):
+    background_data = []
+    for i, bg_file in enumerate(background_files):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
+            tmp_file.write(bg_file.getbuffer())
+            bg_file_path = tmp_file.name
+
+        bg_intensities = []
+        for j, kv in enumerate(num_sets):
+            data = pd.read_excel(bg_file_path, skiprows=3, usecols=[j*2, j*2+1])
+            smoothed_intensity = smooth_data(data.iloc[:, 1])
+            bg_intensities.append(smoothed_intensity)
+
+        background_data.append(bg_intensities)
+
+
+    combined_background_data = []
+    for j in range(len(num_sets)):
+        combined_intensity = np.mean([bg[j] for bg in background_data], axis=0)
+        combined_background_data.append(combined_intensity)
+
+    return combined_background_data
+
+
 def plot_data(processed_data):
     fig = go.Figure()
 
@@ -117,17 +148,31 @@ def plot_data(processed_data):
     st.plotly_chart(fig)
     return fig
 
-# Data export to excel for chromatogram plot
-def save_processed_data_to_excel(processed_data, filename):
-    with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-        for kv, ec_values, normalized_intensity in processed_data:
+
+def save_processed_data_to_excel(processed_data, df_intersections_filtered, df_fraction_aligned, df_histogram):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+       
+        for idx, (kv, ec_values, normalized_intensity) in enumerate(processed_data):
             df = pd.DataFrame({
                 'E_C (V/cm)': ec_values,
-                'Normalized Intensity': normalized_intensity
+                f'Normalized Intensity ({kv} kV)': normalized_intensity
             })
-            df.to_excel(writer, sheet_name=f'{kv} kV', index=False)
+            df.to_excel(writer, sheet_name='Spectra', index=False, startcol=idx * 2)
 
-# Find intersections at a specified threshold
+       
+        df_intersections_filtered.to_excel(writer, sheet_name='Linear_Ec_Ed_Plot', index=False)
+
+       
+        df_fraction_aligned.to_excel(writer, sheet_name='FA_Plot', index=False)
+
+    
+        df_histogram.to_excel(writer, sheet_name='Histogram_Plot', index=False)
+
+    output.seek(0)
+    return output
+
+
 def find_intersections(processed_data, threshold):
     intersections = []
     for kv, ec_values, normalized_intensity in processed_data:
@@ -140,26 +185,26 @@ def find_intersections(processed_data, threshold):
                 break
     return intersections
 
-# Store intersections data in a DataFrame
+
 def store_intersections_in_dataframe(intersections):
     df = pd.DataFrame(intersections, columns=["num_set", "threshold_Ec"])
     return df
 
-# Calculate Ed values
+
 def calculate_ED_values(df):
     df["E_D"] = df["num_set"] / FAIMS_ELECTRODE_GAP
     return df
 
-# Calculate dipole moment values
+
 def calculate_dipole_values(df):
     df["D_moment"] = (K_B * T_ION) / (2 * df["E_D"] * 1e8) / DEBYE_CONVERSION
     return df 
 
-# Filter data by Ed values
+
 def filter_by_ED(df, start_ED):
     return df[df["E_D"] >= start_ED]
 
-# Plot threshold intersections
+
 def plot_intersections(df):
     fig = go.Figure()
 
@@ -183,7 +228,7 @@ def plot_intersections(df):
     st.plotly_chart(fig)
     return fig
 
-# Linear regression on intersections
+
 def perform_linear_regression(df):
     X = df["E_D"].values.reshape(-1, 1)
     y = df["threshold_Ec"].values
@@ -195,7 +240,7 @@ def perform_linear_regression(df):
 
     return slope, intercept, r2
 
-# Calculate fraction of aligned data via integration
+
 def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
     areas = []
     for kv, ec_values, normalized_intensity in processed_data:
@@ -218,9 +263,16 @@ def calculate_fraction_of_aligned(processed_data, last_spectrum_voltage):
 
     fractions = [(kv, (area - last_spectrum_area) / area) for kv, area in areas if area != 0]
 
-    return pd.DataFrame(fractions, columns=["num_set", "fraction_aligned"])
+    df_fractions = pd.DataFrame(fractions, columns=["num_set", "fraction_aligned"])
 
-# Plot scatter plot of aligned fraction as function of ED
+    return df_fractions
+
+
+def filter_fa_by_start_ED(df, start_ED):
+    df["fraction_aligned"] = df.apply(lambda row: 0 if row["E_D"] < start_ED else row["fraction_aligned"], axis=1)
+    return df
+
+
 def plot_fraction_aligned(df):
     fig = go.Figure()
 
@@ -244,7 +296,7 @@ def plot_fraction_aligned(df):
     st.plotly_chart(fig)
     return fig
 
-# Calculate and plot dipole moment histograms
+
 def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
     bin_edges = []
     bin_heights = []
@@ -354,13 +406,13 @@ def calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density):
     st.write("X/Y Data for Horizontal Line Plot:")
     st.write(df_xy)
 
-    return fig
+    return fig, df_histogram
 
-# Run streamlit app
+
 def app():
     st.title("Data Processing and Plotting")
     
-    # Display the information button
+   
     show_calculation_info()
     
     uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx")
@@ -371,6 +423,9 @@ def app():
     start_ED = st.number_input("Start Alignment Point (ED)", value=0.5, step=0.01, format="%.2f")
     last_spectrum_voltage = st.number_input("Last Spectrum Voltage (ED)", value=0.1)
     exclude_negative_density = st.checkbox("Exclude Negative Density", value=False)
+    
+   
+    background_files = st.file_uploader("Upload Background Spectra (optional)", type="xlsx", accept_multiple_files=True)
 
     if uploaded_file is not None:
         if st.button("Run All Calculations and Generate Plots"):
@@ -378,20 +433,13 @@ def app():
                 file_path = tmp_file.name
                 tmp_file.write(uploaded_file.getbuffer())
 
-            file_name = f"{uploaded_file.name.split('.')[0]} Adjusted.xlsx"
-
             try:
-                processed_data = process_data(file_path, num_sets, manual_shift)
-                fig1 = plot_data(processed_data)
-                save_processed_data_to_excel(processed_data, file_name)
+                background_data = None
+                if background_files:
+                    background_data = load_background_data(background_files, num_sets)
 
-                st.success(f"Processed data saved to {file_name}")
-                st.download_button(
-                    label="Download Processed Data",
-                    data=open(file_name, "rb").read(),
-                    file_name=file_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                processed_data = process_data(file_path, num_sets, manual_shift, background_data)
+                fig1 = plot_data(processed_data)
 
                 intersections = find_intersections(processed_data, threshold)
                 df_intersections = store_intersections_in_dataframe(intersections)
@@ -412,15 +460,24 @@ def app():
                 df_fraction_aligned = calculate_fraction_of_aligned(processed_data, last_spectrum_voltage)
                 df_fraction_aligned = calculate_ED_values(df_fraction_aligned)
                 df_fraction_aligned = calculate_dipole_values(df_fraction_aligned)
+                df_fraction_aligned = filter_fa_by_start_ED(df_fraction_aligned, start_ED)
                 st.write("Fraction Aligned DataFrame:")
                 st.write(df_fraction_aligned)
                 fig3 = plot_fraction_aligned(df_fraction_aligned)
                 
-                fig4 = calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density)
+                fig4, df_histogram = calculate_and_plot_histogram(df_fraction_aligned, exclude_negative_density)
+
+                excel_data = save_processed_data_to_excel(processed_data, df_intersections_filtered, df_fraction_aligned, df_histogram)
+                st.download_button(
+                    label="Download Processed Data",
+                    data=excel_data,
+                    file_name=f"{uploaded_file.name.split('.')[0]} Adjusted.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
-# Initialize script when called
+
 if __name__ == "__main__":
     app()
