@@ -1,0 +1,2 @@
+[server]
+maxUploadSize = 1000  # Sets the maximum upload size to 1000 MB 

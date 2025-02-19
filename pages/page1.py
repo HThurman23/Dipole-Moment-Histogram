@@ -10,10 +10,12 @@ from numpy import trapz
 import io
 
 # Constants
-FAIMS_ELECTRODE_GAP = 0.188  
+FAIMS_ELECTRODE_GAP = 0.188
 K_B = 1.380649e-23  
 T_ION = 298.5 
 DEBYE_CONVERSION = 3.33564e-30  
+ED_SCALE_FACTOR = 1
+
 
 # Theme
 plotly_template = "ggplot2"
@@ -52,7 +54,7 @@ def normalize_intensity(intensity):
     return intensity / max(intensity)
 
 
-def smooth_data(intensity, frac=0.03):
+def smooth_data(intensity, frac):
     return sm.nonparametric.lowess(intensity, np.arange(len(intensity)), frac=frac, it=0, return_sorted=False)
 
 
@@ -71,7 +73,7 @@ def adjust_ec_values(ec_values, current_index, target_index, manual_shift):
     return ec_values
 
 
-def process_data(file_path, num_sets, manual_shift, background_data=None):
+def process_data(file_path, num_sets, manual_shift, smoothing_frac, background_data=None, align_data=True):
     max_right_index = -np.inf
     processed_data = []
 
@@ -82,14 +84,12 @@ def process_data(file_path, num_sets, manual_shift, background_data=None):
         data = pd.read_excel(file_path, skiprows=3, usecols=[i*2, i*2+1])
         ec_values = calculate_ec(data.iloc[:, 0], bias, cv_start, scan_rate)
         
-        intensity = data.iloc[:, 1]
+        intensity = data.iloc[:, 1].values
         
         if background_data is not None:
-            background_intensity = background_data[i]
-            intensity -= background_intensity
+            intensity = intensity - background_data[i]
 
-        smoothed_intensity = smooth_data(intensity)  
-
+        smoothed_intensity = smooth_data(intensity, smoothing_frac)
         normalized_intensity = normalize_intensity(smoothed_intensity)
 
         current_right_index = find_rightmost_index(ec_values, normalized_intensity)
@@ -98,34 +98,37 @@ def process_data(file_path, num_sets, manual_shift, background_data=None):
 
         processed_data.append((kv, ec_values, normalized_intensity, current_right_index))
 
+    aligned_data = []
     for i, (kv, ec_values, normalized_intensity, current_right_index) in enumerate(processed_data):
-        adjusted_ec_values = adjust_ec_values(ec_values, current_right_index, max_right_index, manual_shift)
-        processed_data[i] = (kv, adjusted_ec_values, normalized_intensity)
+        if align_data:
+            adjusted_ec_values = adjust_ec_values(ec_values, current_right_index, max_right_index, manual_shift)
+        else:
+            adjusted_ec_values = ec_values
+        aligned_data.append((kv, adjusted_ec_values, normalized_intensity))
 
-    return processed_data
+    return aligned_data
 
-def load_background_data(background_files, num_sets):
-    background_data = []
-    for i, bg_file in enumerate(background_files):
+def load_background_data(background_files, num_sets, smoothing_frac):
+    raw_backgrounds = []
+    for bg_file in background_files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
             tmp_file.write(bg_file.getbuffer())
             bg_file_path = tmp_file.name
 
-        bg_intensities = []
-        for j, kv in enumerate(num_sets):
+        bg_data_sets = []
+        for j in range(len(num_sets)):
             data = pd.read_excel(bg_file_path, skiprows=3, usecols=[j*2, j*2+1])
-            smoothed_intensity = smooth_data(data.iloc[:, 1])
-            bg_intensities.append(smoothed_intensity)
+            bg_data_sets.append(data.iloc[:, 1].values)
+        raw_backgrounds.append(bg_data_sets)
 
-        background_data.append(bg_intensities)
-
-
-    combined_background_data = []
+    averaged_backgrounds = []
     for j in range(len(num_sets)):
-        combined_intensity = np.mean([bg[j] for bg in background_data], axis=0)
-        combined_background_data.append(combined_intensity)
+        set_backgrounds = [bg[j] for bg in raw_backgrounds]
+        stacked_backgrounds = np.vstack(set_backgrounds)
+        avg_background = np.mean(stacked_backgrounds, axis=0)
+        averaged_backgrounds.append(avg_background)
 
-    return combined_background_data
+    return averaged_backgrounds
 
 
 def plot_data(processed_data):
@@ -192,7 +195,7 @@ def store_intersections_in_dataframe(intersections):
 
 
 def calculate_ED_values(df):
-    df["E_D"] = df["num_set"] / FAIMS_ELECTRODE_GAP
+    df["E_D"] = df["num_set"] * ED_SCALE_FACTOR/ FAIMS_ELECTRODE_GAP
     return df
 
 
@@ -417,15 +420,18 @@ def app():
     
     uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx")
     manual_shift = st.number_input("Manual Shift", value=2.2)
+    smoothing_frac = st.number_input("Smoothing Factor (0 to 1)", value=0.03, min_value=0.0, max_value=1.0, format="%.3f")
     num_sets = st.text_input("Number of Sets (comma separated)", "1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1")
     num_sets = [float(n) for n in num_sets.split(",")]
-    threshold = st.number_input("Threshold for Alignment (0 to 1)", value=0.05, min_value=0.0, max_value=1.0)
+    threshold = st.number_input("Threshold for Alignment (0 to 1)", value=0.05, min_value=0.0, max_value=1.0, format="%.3f")
     start_ED = st.number_input("Start Alignment Point (ED)", value=0.5, step=0.01, format="%.2f")
     last_spectrum_voltage = st.number_input("Last Spectrum Voltage (ED)", value=0.1)
     exclude_negative_density = st.checkbox("Exclude Negative Density", value=False)
     
    
     background_files = st.file_uploader("Upload Background Spectra (optional)", type="xlsx", accept_multiple_files=True)
+
+    align_data = st.checkbox("Align Data by Right Index", value=True)
 
     if uploaded_file is not None:
         if st.button("Run All Calculations and Generate Plots"):
@@ -436,9 +442,9 @@ def app():
             try:
                 background_data = None
                 if background_files:
-                    background_data = load_background_data(background_files, num_sets)
+                    background_data = load_background_data(background_files, num_sets, smoothing_frac)
 
-                processed_data = process_data(file_path, num_sets, manual_shift, background_data)
+                processed_data = process_data(file_path, num_sets, manual_shift, smoothing_frac, background_data, align_data)
                 fig1 = plot_data(processed_data)
 
                 intersections = find_intersections(processed_data, threshold)
