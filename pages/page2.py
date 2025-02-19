@@ -84,8 +84,23 @@ def create_excel_download(rt_values, intensities, mz_ranges=None, is_summed=Fals
     return output.getvalue()
 
 def app():
-    st.title("Mass Spectrometry Data Viewer")
+    st.title("FAIMS XIC Calculator")
     
+    # FAIMS Parameters in a dropdown
+    with st.sidebar.expander("FAIMS Parameters", expanded=True):
+        bias = st.number_input("Bias (V)", value=30.0)
+        gap = st.number_input("Gap (mm)", value=0.188, format="%.3f")  # 3 decimal places
+        scan_rate = st.number_input("Scan Rate (V/min)", value=1.0)
+        cv_start = st.number_input("CV Start (V)", value=50.0)
+        cv_end = st.number_input("CV End (V)", value=40.0)
+        waveform_polarity = st.radio("Waveform Polarity", options=["Positive", "Negative"])
+
+    def convert_rt_to_ec(retention_time, bias, cv_start, scan_rate, gap, polarity):
+        if polarity == "Positive":
+            return (bias - (cv_start - (retention_time * scan_rate))) / gap
+        else:  # Negative polarity
+            return ((cv_start - (retention_time * scan_rate)) - bias) / gap
+
     if 'mz_ranges' not in st.session_state:
         st.session_state.mz_ranges = [{'min': 1308.08, 'max': 1309.08}]
     
@@ -94,8 +109,7 @@ def app():
     
     uploaded_file = st.file_uploader("Upload mzML file", type="mzML")
     
-    st.sidebar.markdown("### m/z Range Controls")
-    
+    # m/z Range Controls (without dropdown)
     if st.sidebar.button("Toggle m/z Range Editor"):
         st.session_state.show_edit = not st.session_state.show_edit
     
@@ -186,7 +200,16 @@ def app():
             for i, mz_range in enumerate(st.session_state.mz_ranges):
                 rt, intensity = extract_chromatogram(experiment, mz_range['min'], mz_range['max'])
                 if all_rt is None:
-                    all_rt = rt
+                    # Convert retention time to EC values
+                    all_rt = np.array(rt)  # Convert to numpy array
+                    all_ec = convert_rt_to_ec(
+                        all_rt, 
+                        bias, 
+                        cv_start, 
+                        scan_rate, 
+                        gap, 
+                        waveform_polarity
+                    )
                 all_intensities[i] = intensity
                 
                 # Update progress within extraction step
@@ -200,7 +223,7 @@ def app():
             fig_individual = go.Figure()
             for i, mz_range in enumerate(st.session_state.mz_ranges):
                 fig_individual.add_trace(go.Scatter(
-                    x=all_rt,
+                    x=all_ec,  # Use EC values instead of retention time
                     y=all_intensities[i],
                     mode='lines',
                     name=f'XIC {i+1} ({mz_range["min"]}-{mz_range["max"]} m/z)'
@@ -209,7 +232,7 @@ def app():
             fig_individual.update_layout(
                 template='plotly_dark',
                 title='Individual Extracted Ion Chromatograms (XIC)',
-                xaxis_title='Retention Time (min)',
+                xaxis_title='EC (V/cm)',  # Updated x-axis label
                 yaxis_title='Intensity',
                 showlegend=True,
                 plot_bgcolor='rgba(0,0,0,0)',
@@ -223,7 +246,7 @@ def app():
             
             st.plotly_chart(fig_individual, use_container_width=True)
             
-            excel_data_individual = create_excel_download(all_rt, all_intensities, st.session_state.mz_ranges)
+            excel_data_individual = create_excel_download(all_ec, all_intensities, st.session_state.mz_ranges)
             st.download_button(
                 label="Download Individual XICs Data",
                 data=excel_data_individual,
@@ -240,7 +263,7 @@ def app():
                 summed_intensity = np.sum(all_intensities, axis=0)
                 
                 fig_summed.add_trace(go.Scatter(
-                    x=all_rt,
+                    x=all_ec,  # Use EC values instead of retention time
                     y=summed_intensity,
                     mode='lines',
                     name='Summed XIC'
@@ -249,7 +272,7 @@ def app():
                 fig_summed.update_layout(
                     template='plotly_dark',
                     title='Summed Extracted Ion Chromatogram',
-                    xaxis_title='Retention Time (min)',
+                    xaxis_title='EC (V/cm)',  # Updated x-axis label
                     yaxis_title='Intensity',
                     showlegend=True,
                     plot_bgcolor='rgba(0,0,0,0)',
@@ -259,7 +282,7 @@ def app():
                 
                 st.plotly_chart(fig_summed, use_container_width=True)
                 
-                excel_data_summed = create_excel_download(all_rt, summed_intensity, is_summed=True)
+                excel_data_summed = create_excel_download(all_ec, summed_intensity, is_summed=True)
                 st.download_button(
                     label="Download Summed XIC Data",
                     data=excel_data_summed,
