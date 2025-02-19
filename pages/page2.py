@@ -89,7 +89,7 @@ def app():
     # FAIMS Parameters in a dropdown
     with st.sidebar.expander("FAIMS Parameters", expanded=True):
         bias = st.number_input("Bias (V)", value=30.0)
-        gap = st.number_input("Gap (mm)", value=0.188, format="%.3f")  # 3 decimal places
+        gap = st.number_input("Gap (cm)", value=0.188, format="%.3f")  # 3 decimal places
         scan_rate = st.number_input("Scan Rate (V/min)", value=1.0)
         cv_start = st.number_input("CV Start (V)", value=50.0)
         cv_end = st.number_input("CV End (V)", value=40.0)
