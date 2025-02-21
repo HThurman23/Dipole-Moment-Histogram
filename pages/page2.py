@@ -68,7 +68,7 @@ def create_excel_download(rt_values, intensities, mz_ranges=None, is_summed=Fals
         if is_summed:
             # Summed chromatogram
             df = pd.DataFrame({
-                'Retention Time (min)': rt_values,
+                'Ec (V/cm)': rt_values,
                 'Summed Intensity': intensities
             })
             df.to_excel(writer, sheet_name='Summed_Chromatogram', index=False)
@@ -76,12 +76,27 @@ def create_excel_download(rt_values, intensities, mz_ranges=None, is_summed=Fals
             # Individual chromatograms
             for i, intensity in enumerate(intensities):
                 df = pd.DataFrame({
-                    'Retention Time (min)': rt_values,
+                    'Ec (V/cm)': rt_values,
                     f'Intensity ({mz_ranges[i]["min"]}-{mz_ranges[i]["max"]} m/z)': intensity
                 })
                 df.to_excel(writer, sheet_name=f'XIC_{i+1}', index=False)
     
     return output.getvalue()
+
+def load_mz_ranges_from_excel(file):
+    """Load m/z ranges from Excel file"""
+    try:
+        df = pd.read_excel(file)
+        if 'min' not in df.columns or 'max' not in df.columns:
+            raise ValueError("Excel file must contain 'min' and 'max' columns")
+        
+        ranges = []
+        for _, row in df.iterrows():
+            ranges.append({'min': float(row['min']), 'max': float(row['max'])})
+        return ranges
+    except Exception as e:
+        st.error(f"Error reading Excel file: {str(e)}")
+        return None
 
 def app():
     st.title("FAIMS XIC Calculator")
@@ -109,6 +124,19 @@ def app():
     
     uploaded_file = st.file_uploader("Upload mzML file", type="mzML")
     
+    st.sidebar.markdown("### Import m/z Ranges from Excel")
+    uploaded_excel = st.sidebar.file_uploader("Upload Excel file", type="xlsx")
+    if uploaded_excel is not None:
+        file_name = os.path.splitext(uploaded_excel.name)[0]
+        if st.sidebar.button("Import Ranges"):
+            ranges = load_mz_ranges_from_excel(uploaded_excel)
+            if ranges:
+                st.session_state.mz_ranges = ranges
+                # Save the imported ranges automatically
+                save_mz_ranges(ranges, file_name)
+                st.sidebar.success(f"Imported and saved ranges as '{file_name}'")
+                st.rerun()
+
     # m/z Range Controls (without dropdown)
     if st.sidebar.button("Toggle m/z Range Editor"):
         st.session_state.show_edit = not st.session_state.show_edit
